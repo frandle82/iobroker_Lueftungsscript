@@ -1,5 +1,5 @@
 //
-// Raumklima - v0.6.7
+// Raumklima - v0.6.8
 //
 // Berechnet Taupunkt, absolute Luftfeuchtigkeit, Enthalpie, Lüftungsempfehlung,
 // gemessene Temperatur & Luftfeuchtigkeit inkl. Offset zwecks Kalibrierung
@@ -32,6 +32,8 @@
 //   Verzicht auf externes Modul "dewpoint"
 // - boriswerner:
 //   Nutzung 0_userdata, fix JSON String-handling
+// - frandle:
+//   individuelle Raumtemperatur mit Erkennung Fensteröffnung, globaler Luftdrucksensor(dasWetter-Adapter oder physisch)
  
 // https://forum.iobroker.net/topic/2313/skript-absolute-feuchte-berechnen/437 
 // TODO:
@@ -59,7 +61,7 @@
 //
 // # "Lüftungsengine":
 // -------------------
-// - möglichst an die individuellen Situationen und Vorlieben anpassbar
+// - möglichst an die individuellen Situationen und Vorlieben anpassbar 
 // - differenziertere Lüftungsempfehlung
 // - CO2, Luftgüte einbeziehen
 // - Experteneinstellungen (welche Werte sind einem wichtig)
@@ -100,7 +102,13 @@ var debug = false;                      // true: erweitertes Logging einschalten
  
  
 // eigene Parameter:
-var hunn            = 15;           // eigene Höhe über nn (normalnull), z.B. über http://de.mygeoposition.com zu ermitteln
+
+var pressure_Sensor = "zigbee.0.00158d0005446ec5.pressure";        // Globaler Datenpunkt Luftdrucksensor, wenn nicht angegeben, wird mit hunn gerechnet.
+//TODO: Luftdruck Raum überschreibt globalen Sensorwert
+//      Lüftungsengine
+
+var openwindowtemp  = 12;        // Temperatur Fenster offen - Wert wird für Auskühlschutz beim Setzen der individueller Raumtemperatur ignoriert
+var hunn            = 15;        // eigene Höhe über nn (normalnull), z.B. über http://de.mygeoposition.com zu ermitteln
 var defaultTemp     = 18.00;     // Default TEMP_Minimum, wenn im Raum nicht angegeben (Auskühlschutz, tiefer soll eine Raumtemperatur durchs lüften nicht sinken)
 var defaultMinFeu   = 40.00;     // Default Mindest Feuchte wenn nicht angegeben.
 var defaultMaxFeu   = 60.00;     // Default Maximal Feuchte wenn nicht angegeben.
@@ -115,8 +123,9 @@ var strDatum        = "DD-MM-JJJJ SS:mm:ss";// Format, in dem das Aktualisierung
 // Lüftungsengine
  
 var hysMinTemp      = 0.5;              // Default 0.5, Hysterese Mindesttemperatur (Auskühlschutz). Innerhalb dieser Deltatemperatur bleibt die alte Lüftungsempfehlung für den Auskühlschutz bestehen.
-var hysEntfeuchten  = 0.3;              // Default 0.3, Hysterese Entfeuhten: Delta g/kG absolute Luftfeuchte. In dem Delta findet keine Änderung der alten Lüftungsempfehlung statt    
- 
+var hysEntfeuchten  = 0.8;              // Default 0.3, Hysterese Entfeuhten: Delta g/kG absolute Luftfeuchte. In dem Delta findet keine Änderung der alten Lüftungsempfehlung statt    
+
+                                    
  
 // Skriptverhalten
 var delayRooms      = 500;              // Zeit in ms als Verzögerung, wie die Räume abgearbeitet werden
@@ -168,7 +177,7 @@ var infoPfad    = "Skriptinfos" +".";   // Pfad für globale Skriptparameter zur
          "Sensor_HUM"            :   'hm-rpc.0.000E9569A23C4A.1.HUMIDITY' /*Badzimmer.HUMIDITY*/,
          "Sensor_TEMP_OFFSET"    :   0.0,
          "Sensor_HUM_OFFSET"     :   0,
-         "TEMP_Minimum"          :   19.50, // oder Zieltemperatur in Form von: 20.00 angeben
+         "TEMP_Minimum"          :   'hm-rpc.0.000E9569A23C4A.1.SET_POINT_TEMPERATURE', // oder Zieltemperatur in Form von: 20.00 angeben
          "Aussensensor"          :   "Aussen"
      },
       
@@ -178,7 +187,7 @@ var infoPfad    = "Skriptinfos" +".";   // Pfad für globale Skriptparameter zur
          "Sensor_HUM"            :   'hm-rpc.0.000313C995523A.1.HUMIDITY' /*Badzimmer.HUMIDITY*/,
          "Sensor_TEMP_OFFSET"    :   0.0,
          "Sensor_HUM_OFFSET"     :   0,
-         "TEMP_Minimum"          :   21.00, // oder Zieltemperatur in Form von: 20.00 angeben
+         "TEMP_Minimum"          :   'hm-rpc.0.000313C995523A.1.SET_POINT_TEMPERATURE', // oder Zieltemperatur in Form von: 20.00 angeben
          "Aussensensor"          :   "Aussen"
      },
       
@@ -188,7 +197,7 @@ var infoPfad    = "Skriptinfos" +".";   // Pfad für globale Skriptparameter zur
          "Sensor_HUM"            :   'hm-rpc.0.000E97099D2AF1.1.HUMIDITY' /*Badzimmer.HUMIDITY*/,
          "Sensor_TEMP_OFFSET"    :   0.0,
          "Sensor_HUM_OFFSET"     :   0,
-         "TEMP_Minimum"          :   21.00, // oder Zieltemperatur in Form von: 20.00 angeben
+         "TEMP_Minimum"          :   'hm-rpc.0.000E97099D2AF1.1.SET_POINT_TEMPERATURE', // oder Zieltemperatur in Form von: 20.00 angeben
          "Aussensensor"          :   "Aussen"
      },
            
@@ -217,7 +226,8 @@ var infoPfad    = "Skriptinfos" +".";   // Pfad für globale Skriptparameter zur
 var dewpoint = function(h) {
         var z = 1.0 - (0.0065 / 288.15) * h;
         // air pressure in hPa
-        this.p = 1013.25 * Math.pow(z, 5.255);
+        this.p = ((pressure_Sensor == "") ? 1013.25 : getState(pressure_Sensor).val) * Math.pow(z, 5.255);
+        //this.p = 1013.25 * Math.pow(z, 5.255);
         this.A = 6.112;
         }
 dewpoint.prototype.Calc = function(t, rh) {
@@ -587,7 +597,13 @@ function createDp() {
            common = raumControl[control].dp;
            if (typeof raeume[raum][raumControl[control].DpName] !=="undefined") {
                init = raeume[raum][raumControl[control].DpName];
-               if (typeof init === "string" && init !== "Aussen")init = getState(init).val;
+               if (typeof init === "string" && init !== "Aussen"){
+                    if(init == openwindowtemp) {                                         //falls Fenster offen bei Initialisierungq
+                        init = defaultTemp;
+                    }else {
+                        init = getState(init).val;
+                    }
+               }
                createState(name, init , forceCreation, common);
                var channelname = "Nur Info. Werte aus dem Skript zählen. Kann im Skript umgestellt werden.";
                if (!skriptConf) channelname = "Änderungen hier in den Objekten werden berechnet";
@@ -661,8 +677,13 @@ function runden(wert,stellen) {
  
 // berechnet den mittleren Luftdruck für eine Höhenangabe in NN 
 function luftdruck(hunn) {
-   var pnn         = 1013.25;                                  // Mittlerer Luftdruck          in hPa bei NN
-   var p           = pnn - (hunn / 8.0);                       // individueller Luftdruck      in hPa (eigenen Höhe)
+    var p, pnn
+    if(pressure_Sensor == ""){
+        pnn         = 1013.25;                             // Mittlerer Luftdruck          in hPa bei NN
+        p           = pnn - (hunn / 8.0);                  // individueller Luftdruck      in hPa (eigenen Höhe)
+    }else{
+        p           = getState(pressure_Sensor).val
+    }
    return p / 1000;                                            // Luftdruck von hPa in bar umrechnen
 }
  
@@ -776,7 +797,7 @@ function calc(raum) {                                           // Über Modul D
    setState(idx    , runden(x,2));     // errechnete absolute Feuchte in Datenpunkt schreiben
    setState(iddp   , runden(dp,1));    // errechneter Taupunkt in Datenpunkt schreiben
    setState(idt    , parseFloat(t));   // Sensor Temperatur        inkl. Offset
-   setState(idrh   , parseFloat(rh));   // Sensor Relative Feuchte  inkl. Offset
+   setState(idrh   , parseFloat(rh));  // Sensor Relative Feuchte  inkl. Offset
    setState(ih     , runden(h,2));     // Enthalpie in kJ/kg
    setState(isdd   , runden(sdd,2));
    setState(idd    , runden(dd,2));
@@ -807,17 +828,18 @@ function calc(raum) {                                           // Über Modul D
    var ta = getState(idta).val;    // Aussentemperatur in °C
    var xa = getState(idxa).val;    // Aussenfeuchtegehalt in g/kg
    if (xa == 0) return;            // TODO: warum? hatte ich leider nciht dokumentiert (ruhr70)
- 
+   var xm = xa + ((xi - xa)* 0.5); // angenommene Raumfeuchtegehalt aus gemischten Luftmassen 
+
    var mi = defaultTemp;           // Temperaturmindestwert auf Default (Auskühlschutz)
    var xh = defaultMaxFeu;         // Feuchtemaximalwert auf Default
    var xt = defaultMinFeu;         // Feuchteminimalwert auf Default
 	  
    //if(typeof raeume[raum].TEMP_Minimum !=="undefined") {
-   if(typeof raeume[raum].TEMP_Minimum == "number") {
+   if(typeof raeume[raum].TEMP_Minimum == "number" && raeume[raum].TEMP_Minimum != openwindowtemp) {
        mi = raeume[raum].TEMP_Minimum;
    }
-   if(typeof raeume[raum].TEMP_Minimum == "string") {
-       mi = getState(raeume[raum].TEMP_Minimum).val;
+   if(typeof raeume[raum].TEMP_Minimum == "string" && getState(raeume[raum].TEMP_Minimum).val != openwindowtemp) {
+            mi = getState(raeume[raum].TEMP_Minimum).val;
    }
    if(typeof raeume[raum].FEUCH_Maximum == "number") {
        xh = raeume[raum].FEUCH_Maximum;
@@ -847,7 +869,8 @@ function calc(raum) {                                           // Über Modul D
    // -------------
    // Lüftungsempfehlung steuern mit 0,3 g/kg und 0,5 K Hysterese
    // Bedigungen fürs lüften
-   var b1lp = (xa <= (xi - (hysEntfeuchten + 0.1)))    ? true : false;   // Bedingnung 1 lüften positv (Außenluft ist mind. 0,4 trockener als Innen)
+   //var b1lp = (xa <= (xi - (hysEntfeuchten + 0.1)))    ? true : false;   // Bedingnung 1 lüften positv (Außenluft ist mind. 0,4 trockener als Innen)
+   var b1lp = (xa <= (xm - (hysEntfeuchten + 0.1)))    ? true : false;   // Bedingnung 1 lüften positv (Außenluft ist trockener als Mischung Innen/Aussen)
    var b2lp = (ta <= (ti - 0.6))                       ? true : false;   // Bedingnung 2 lüften positv (Außentemperatur ist mindestens 0,6 Grad kühler als innen)
    var b3lp = (ti >= mih)                              ? true : false;   // Bedingnung 3 lüften positv (Innentemperatur ist höher als die Minimumtemperatur + Hysterese)
    var b4lp = (rh >= xh)                               ? true : false;   // Bedingnung 4 lüften positv (Relative Raumfeuchte ist höher als die Maximalfeuchtewert)
@@ -868,10 +891,10 @@ function calc(raum) {                                           // Über Modul D
    var b3ln = (ti <= mit)          ? true : false;   // Bedingnung 3 lüften negativ (Innentemperatur niedriger als Mindesttemperatur)
    var b4ln = (rh <= xt)           ? true : false;   // Bedingnung 4 lüften negativ (Relative Raumfeuchte ist niedriger als die Mindestfeuchte)
  
-   var b1lnText = "Außenluft ist zu feucht";
-   var b2lnText = "Außentemperatur zu warm";
-   var b3lnText = "Raum ist zu kalt";
-   var b4lnText = "Raumfeuchte ist zu niedrig";
+    var b1lnText = "Entfeuchten:    Außenluft ist zu feucht";
+    var b2lnText = "Kühlen:         Außentemperatur zu warm";
+    var b3lnText = "Auskühlschutz:  Innentemperatur niedriger als Mindestraumtemperatur";
+    var b4lnText = "Raumfeuchte:    Raumfeuchte ist niedriger als der Mindestfeuchte";
  
    
    // Logik:
@@ -886,14 +909,11 @@ function calc(raum) {                                           // Über Modul D
  
    } else if (b1ln || b2ln || b3ln || b4ln) {
        // Fenster zu. Ein Ausschlusskriterium reicht für die Empfehlung "Fenster zu".
-       lueftenText = "Fenster zu: ";
-       if (b1ln) lueftenText += b1lnText; 
-       if (b1ln && b2ln) lueftenText += ", " ;
-       if (b2ln) lueftenText += b2lnText; 
-       if (b2ln && b3ln) lueftenText += ", "  ;
-       if (b3ln) lueftenText += b3lnText;
-       if (b4ln) lueftenText += ", " ;
-	   if (b4ln) lueftenText += b4lnText;
+       lueftenText = "Fenster zu:<br>";
+       if (b1ln) lueftenText += b1lnText + "<br>";
+       if (b2ln) lueftenText += b2lnText + "<br>";
+       if (b3ln) lueftenText += b3lnText + "<br>";
+	   if (b4ln) lueftenText += b4lnText + "<br>";
        setState(idLueften, false);
        setState(idLueftenHys,false);
        if (debug) log(raum + ': <span style="color:red;"><b>Empfehlung Fenster zu</b></span>');
@@ -901,7 +921,7 @@ function calc(raum) {                                           // Über Modul D
        // Hysterese. Keine Änderung der bisherigen Empfehlung.
        if (debug) log(raum + ': <span style="color:orange;"><b>im Bereich der Hysterese</b></span> (keine Änderung der Lüftungsempfehlung');
        if (getState(idLueften).val === null) setState(idLueften,false); // noch keine Empfehlung vorhanden, "Fenster zu" empfehlen
-       lueftenText = "Hysterese, keine Änderung der Lüftungsempfehlung:";
+       lueftenText = "Hysterese, keine Änderung der Lüftungsempfehlung";
        setState(idLueftenHys,true);
    }
    setState(idLueftenText, lueftenText);
