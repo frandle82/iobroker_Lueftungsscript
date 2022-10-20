@@ -97,14 +97,19 @@
  
 var debug = false;                      // true: erweitertes Logging einschalten
 
-var Raum_DP = true;			// Anlegen und Ausgabe der Raum-Datenpunkte
-var DetailsLuft_DP = true;		// Anlegen und Ausgabe der Raum-Detail-Luftempfehlung-Datenpunkte
+var Raum_DP = true;
+var DetailsLuft_DP = true;
 var JSON_DP = true;                     // Anlegen und Ausgabe der JSON-Datenpunkte
-var Details_DP = true;			// Anlegen und Ausgabe der Raum-Detail-Luftempfehlung-Datenpunkte
+var Details_DP = true;
 var Control = true;                     // Anwender kann sich aussuchen, ob er die Werte im Skript oder über die Objekte pflegen möchte
-					// Skript läuft ohne Datenpunkte, lediglich der Skriptpfad wird angelegt                                        
- 
-// eigene Parameter:
+                                        // false: Control-Zweig wird nicht angelegt und Raumwerte werden über das Skript geändert/überschrieben (var raeume)
+                                        // true: Control-Zweig wird angelegt und Raumwerte werden über Objekte (z.B. im Admin, Zustände oder VIS) geändert
+
+var pressure_Sensor = "zigbee.0.00158d0005446ec5.pressure";        // Globaler Datenpunkt Luftdrucksensor, wenn nicht angegeben, wird mit hunn gerechnet.
+//TODO: Luftdruck Raum überschreibt globalen Sensorwert
+//      Lüftungsengine
+
+var openwindowtemp  = 12; 
 var hunn            = 15;           // eigene Höhe über nn (normalnull), z.B. über http://de.mygeoposition.com zu ermitteln
 var defaultTemp     = 18.00;     // Default TEMP_Minimum, wenn im Raum nicht angegeben (Auskühlschutz, tiefer soll eine Raumtemperatur durchs lüften nicht sinken)
 var defaultMinFeu   = 40.00;     // Default Mindest Feuchte wenn nicht angegeben.
@@ -120,7 +125,7 @@ var strDatum        = "DD-MM-JJJJ SS:mm:ss";// Format, in dem das Aktualisierung
 // Lüftungsengine
  
 var hysMinTemp      = 0.5;              // Default 0.5, Hysterese Mindesttemperatur (Auskühlschutz). Innerhalb dieser Deltatemperatur bleibt die alte Lüftungsempfehlung für den Auskühlschutz bestehen.
-var hysEntfeuchten  = 0.3;              // Default 0.3, Hysterese Entfeuhten: Delta g/kG absolute Luftfeuchte. In dem Delta findet keine Änderung der alten Lüftungsempfehlung statt    
+var hysEntfeuchten  = 0.8;              // Default 0.3, Hysterese Entfeuhten: Delta g/kG absolute Luftfeuchte. In dem Delta findet keine Änderung der alten Lüftungsempfehlung statt    
  
  
 // Skriptverhalten
@@ -217,11 +222,12 @@ var infoPfad    = "Skriptinfos";   // Pfad für globale Skriptparameter zur Info
   
  // =============================================================================
 
-var Group = {}
+var Group = {};             // Group-Objekt bekommt alle Werte und Informationen der Datenpunkte
 
 // Das Modul dewpoint - integriert, keine externe Abhängigkeit mehr
 // Start Modul Dewpoint
 // Calculation of absolute humidity x (in g water per kg dry air) and of dew point temperature (in �C)
+
 var dewpoint = function(h) {
         var z = 1.0 - (0.0065 / 288.15) * h;
         // air pressure in hPa
@@ -269,13 +275,9 @@ var raumDatenpunkte = {
 "Beschreibung" : {DpName : "Beschreibung",common: { read: true, write : false, name: 'Lüftungsempfehlung beschreibender Text',desc: 'Lüftungsempfehlung beschreibender Text',type: 'string',role : 'value', def: ""}},
 },
 "controlPfad": {
-"Sensor_TEMP" : {DpName : "Sensor_TEMP",common: { read: true, write : true, name: 'Datenpunkt Temperatursensor',desc: 'Datenpunkt Temperatursensor', type: 'string',role: 'control.value', unit: '', def: ""}},
-"Sensor_HUM" : {DpName : "Sensor_HUM",common: { read: true, write : true, name: 'Datenpunkt Luftfeuchtigkeitssensor',desc: 'Datenpunkt Luftfeuchtigkeitssensor', type: 'string', role: 'control.value', unit: '',def:""}},
 "Sensor_TEMP_OFFSET" : {DpName : "Sensor_TEMP_OFFSET",common: { read: true, write : true, name: 'Offset Temperatur zum Sensormesswert (Ausgleich von Ungenauigkeiten)',desc: 'Offset Temperatur zum Sensormesswert (Ausgleich von Ungenauigkeiten)', type: 'number',role: 'control.value', unit: '°C', def: 0}},
 "Sensor_HUM_OFFSET" : {DpName : "Sensor_HUM_OFFSET",common: { read: true, write : true, name: 'Offset Luftfeuchtigkeit zum Sensormesswert (Ausgleich von Ungenauigkeiten)',desc: 'Offset Luftfeuchtigkeit zum Sensormesswert (Ausgleich von Ungenauigkeiten)', type: 'number', role: 'control.value', unit: '%', def:0}},
-"TEMP_Minimum" : {DpName : "TEMP_Minimum",common: { read: true, write : true, name: 'Auskühlschutz Mindestraumtemperatur',desc: 'Auskühlschutz Mindestraumtemperatur zum lüften', type: 'number',role: 'control.value', unit: '°C', def: 0}},
-"FEUCH_Minimum" : {DpName : "FEUCH_Minimum",common: { read: true, write : true,name: 'Mindest Rel. Raumfeuchte',desc: 'Mindest Rel. Raumfeuchte zum lüften',type: 'number',role: 'control.value',unit: '%' , def: 0}},
-"FEUCH_Maximum" : {DpName : "FEUCH_Maximum",common: { read: true, write : true, name: 'Maximal Rel. Raumfeuchte ', desc: 'Maximal Rel. Raumfeuchte zum lüften',type: 'number',"role": 'control.value',unit: '%', def: 0}},
+"TEMP_Minimum" : {DpName : "TEMP_Minimum",common: { read: true, write : true, name: 'Auskühlschutz Mindestraumtemperatur',desc: 'Auskühlschutz Mindestraumtemperatur zum lüften', type: 'mixed',role: 'control.value', unit: '°C', def: 0}},
 "Aussensensor" : {DpName : "Aussensensor", common: {read: true, write : true, name: 'Aussensensor, der zum Vergleich genommen wird', desc: 'Aussensensor, der zum Vergleich genommen wird',type: 'string', role: 'control.value', def:""}},
 },
 };
@@ -289,8 +291,8 @@ var JSON = {
 };
 var Skriptinfo = {
 "infoPfad" : {
-"Luftdruck" : {DpName : "Luftdruck",common: { read: true, write : true, name: "mittlerer Luftdruck in bar", desc: "mittlerer Luftdruck in bar, errechnet anhand der eigenen Höhe über NN",type: 'number',unit: 'bar',role: 'info'}},
-"Höhe_über_NN" : {DpName : "Höhe_über_NN",common: { read: true, write : true, name: 'Eigene Höhe über NN',desc: 'Eigene Höhe über NN (Normal Null), als Basis für den mittleren Luftdruck',type: 'number',"unit": 'm',role: 'info'}},
+"Luftdruck" : {DpName : "Luftdruck",common: { read: true, write : true, name: "mittlerer Luftdruck in bar", desc: "mittlerer Luftdruck in bar, errechnet anhand der eigenen Höhe über NN",type: 'number',unit: 'bar',role: 'info', def: 0}},
+"Höhe_über_NN" : {DpName : "Höhe_über_NN",common: { read: true, write : true, name: 'Eigene Höhe über NN',desc: 'Eigene Höhe über NN (Normal Null), als Basis für den mittleren Luftdruck',type: 'number',"unit": 'm',role: 'info', def: 0}},
 },
 };
 
@@ -301,14 +303,16 @@ var xdp     = new dewpoint(hunn);
  
 var pbar    = luftdruck(hunn);          // individueller Luftdruck in bar (eigene Höhe)
 
+function setGloblvar() {
+    setWerte(pfad +  "." + infoPfad + ".Luftdruck", pbar) ;
+    setWerte(pfad +  "." + infoPfad + ".Höhe_über_NN", hunn) ;
+}
+
 //------------------------------------------------------------------------------
 // Funktionen
 //------------------------------------------------------------------------------
  
-function writeJson(json) {
-   return JSON.stringify(json);
-}
- 
+
  
 // prüft ob setObjects() für die Instanz zur Verfügung steht (true/false)
 function checkEnableSetObject() { 
@@ -317,24 +321,31 @@ function checkEnableSetObject() {
 }
  
 function init() {
-    ; // Group-Objekt bekommt alle Werte und Informationen der Datenpunkte
+    // Group-Objekt bekommt alle Werte und Informationen der Datenpunkte
     var name;
     var dpname;
     var common;
-    var triggerID;
 
-    Group[pfad]={};
+    Group[pfad]={};                                             // Anlegen Ebene Pfad
     for (var id in JSON){
         common = JSON[id].common;
         Group[pfad][id] = {}
         Group[pfad][id].common = common;
         Group[pfad][id].val = common.def
-    }                                                           // Anlegen Ebene Pfad
-    Group[pfad][raumPfad] = {};                                 // Anlegen Ebene Raumpfad
+    }                                                
+    Group[pfad][raumPfad] = {};                                // Anlegen Ebene Raumpfad
+    Group[pfad][infoPfad] = {};
+    for (var prop1 in Skriptinfo["infoPfad"]){
+
+        common = Skriptinfo["infoPfad"][Skriptinfo["infoPfad"][prop1].DpName].common;
+        Group[pfad][infoPfad][prop1] = {}
+        Group[pfad][infoPfad][prop1].common = common;
+        Group[pfad][infoPfad][prop1].val = common.def
+    }   
     for (var raum in raeume) {
-        Group[pfad][raumPfad][raum] = {};                                   // Anlegen Ebene DP Raum
+        Group[pfad][raumPfad][raum] = {};                       // Anlegen Ebene DP Raum                                
         for (var datenpunktID in raumDatenpunkte) {
-            if((!raeume[raum].Aussensensor && datenpunktID == "DETAILS Lüftungsempfehlung")||(!raeume[raum].Aussensensor && datenpunktID == "lüften")){
+            if((!raeume[raum].Aussensensor && datenpunktID == "detailEnginePfad")||(!raeume[raum].Aussensensor && datenpunktID == "lüften")){
                 log(raum + ": kein Aussensensor angegeben.  ### Messpunkte werden als Aussensensoren behandelt. ###","info"); // Warnung ist im Log OK, wenn es sich um einen Außensensor handelt.
             }else{
                 name = raumDatenpunkte[datenpunktID].DpName;
@@ -363,105 +374,83 @@ function init() {
                     if(raumDatenpunkte[datenpunktID][dpID].DpName != undefined){
                         dpname = raumDatenpunkte[datenpunktID][dpID].DpName;
                         common = raumDatenpunkte[datenpunktID][dpID].common;
+                        if((!raeume[raum].Aussensensor && dpname == "Aussensensor") || (!raeume[raum].Aussensensor && dpname == "TEMP_Minimum")) continue;
                         Group[pfad][raumPfad][raum][name][dpname] = {};         //Anlegen Ebene 
                         Group[pfad][raumPfad][raum][name][dpname].common = common;
                         Group[pfad][raumPfad][raum][name][dpname].val = common.def;
-                        if(dpname == "Sensor_TEMP" || dpname == "Sensor_HUM" || (dpname == "TEMP_Minimum" && typeof raeume[raum][dpname] == "string")) {
-                            Group[pfad][raumPfad][raum][name][dpname].val = raeume[raum][dpname];
-                            triggerID = Group[pfad][raumPfad][raum][name][dpname].val;
-                            on({id: triggerID ,change:'ne'}, function (obj) {
-                                valChange(obj)
-                            });
-
-                        }
                     }                    
-
                 }
             }
         }
     }
     createDp(Group);
+    calcAll();
+    setGloblvar()
 };
 
-function createDp(Group){
-    var name = "";
-    var control_path = (!Control)? controlPfad: "";
-    var detail_path = (!Details_DP)? detailPfad: "";
-    var detailE_path = (!DetailsLuft_DP)? detailEnginePfad: "";
-    var raum_path = (!Raum_DP)? raumPfad: "";
-    
-    for(var l1 in Group){
-        name = l1;
-        if (!existsObject(l1)) setObject(l1, { type: "channel", common: { name: l1 }, native: {} });
-        for(var l2 in Group[l1]){ 
-            name = l1 + "."+l2;
-            if(l2 == raum_path) continue;
-            if(Group[l1][l2].common != undefined && JSON_DP){
-                createState(name,Group[l1][l2].common);
-                setWerte(name, Group[l1][l2].common.def)
-            }
-            for(var l3 in Group[l1][l2]){
-                name = l1 + "."+l2 + "."+l3;
-                if(Group[l1][l2][l3].common != undefined){
-                    createState(name,Group[l1][l2][l3].common);
-                    setWerte(name, Group[l1][l2][l3].common.def)
-                }
-                for(var l4 in Group[l1][l2][l3]){
-                    name = l1 + "."+l2 + "."+l3 + "."+ l4;
-                    if(Group[l1][l2][l3][l4].common != undefined){
-                        createState(name,Group[l1][l2][l3][l4].common)
-                        setWerte(name, Group[l1][l2][l3][l4].common.def)
-                    }else{ 
-                        if(l4 == control_path || l4 == detail_path || l4 == detailE_path) continue;
-                    }                
-                    for(var l5 in Group[l1][l2][l3][l4]){
-                        name = l1 + "."+l2 + "."+l3 + "."+ l4 + "."+l5;
-                        if(typeof Group[l1][l2][l3][l4][l5].common != "undefined") {
-                            createState(name,Group[l1][l2][l3][l4][l5].common);
-                            setWerte(name, Group[l1][l2][l3][l4][l5].common.def)
-                        }
-                    }
-                }
-            }
+
+function createDp(obj, propStr = '') {
+    var control_path = (!Control)? controlPfad: "/";
+    var detail_path = (!Details_DP)? detailPfad: "/";
+    var detailE_path = (!DetailsLuft_DP)? detailEnginePfad: "/";
+    var raum_path = (!Raum_DP)? raumPfad: "/";
+
+    Object.entries(obj).forEach(([key, val]) => {
+        if (typeof val === 'object' && key != 'val' &&  key != 'common') {
+            const nestedPropStr = propStr + (propStr ? '.' : '') + key;
+            createDp(val, nestedPropStr);
+        }else{
+            if(!propStr.includes(control_path) && !propStr.includes(detail_path) && !propStr.includes(detailE_path) && !propStr.includes(raum_path)){
+                var common = getWerte(propStr,"common");
+                var val = getWerte(propStr,"val")
+                if(!existsState(propStr)) createState(propStr,common);
+            } 
         }
-    } 
-};
+    });
+}
+
+
 
 function setWerte(id, val){
     if(existsState(id)) setState(id ,val,true);
     id = id.substr(id.indexOf(pfad)+pfad.length+1).split(".")
     id.unshift(pfad)
     id.push("val")
-    manageGroupObj(Group,"Set", id, val,);
+    manageGroupObj(Group,"Set", id, val);
 }
 
-function getWerte(id){
+function getWerte(id, value){
     var value;
     id = id.substr(id.indexOf(pfad)+pfad.length+1).split(".")
     id.unshift(pfad)
-    id.push("val")
+    id.push(value)
     value = manageGroupObj(Group, "Get", id);
     return value
 }
 
 function manageGroupObj(obj, action, path, value) {
     let level = 0;
-    var return_Value;
+    var Return_Value;
     path.reduce((a, b)=>{
         level++;
         if (level === path.length){
             if(action === 'Set'){
                 a[b] = value;
                 return value;
-            }else if(action === 'Get'){
-                return_Value = a[b];
             }
-        } else {
+            else if(action === 'Get'){
+                Return_Value = a[b];
+            }
+            else if(action === 'Unset'){
+                delete a[b];
+            }
+        }else {
             return a[b];
         }
     }, obj);
-    return return_Value;
+    return Return_Value;
 }
+
 
 // rundet einen Float auf eine bestimmte Anzahl Nachkommastellen
 function runden(wert,stellen) {
@@ -470,8 +459,13 @@ function runden(wert,stellen) {
  
 // berechnet den mittleren Luftdruck für eine Höhenangabe in NN 
 function luftdruck(hunn) {
-   var pnn         = 1013.25;                                  // Mittlerer Luftdruck          in hPa bei NN
-   var p           = pnn - (hunn / 8.0);                       // individueller Luftdruck      in hPa (eigenen Höhe)
+    var p, pnn
+    if(pressure_Sensor == ""){
+        pnn         = 1013.25;                             // Mittlerer Luftdruck          in hPa bei NN
+        p           = pnn - (hunn / 8.0);                  // individueller Luftdruck      in hPa (eigenen Höhe)
+    }else{
+        p           = getState(pressure_Sensor).val
+    }
    return p / 1000;                                            // Luftdruck von hPa in bar umrechnen
 }
  
@@ -617,6 +611,9 @@ function calc(raum) {                                           // Über Modul D
    var xt = defaultMinFeu;         // Feuchteminimalwert auf Default
       
    //if(typeof raeume[raum].TEMP_Minimum !=="undefined") {
+   if(typeof raeume[raum].TEMP_Minimum == "number" && raeume[raum].TEMP_Minimum != openwindowtemp) {
+       mi = raeume[raum].TEMP_Minimum;
+   } 
    if(typeof raeume[raum].TEMP_Minimum == "number") {
        mi = raeume[raum].TEMP_Minimum;
    }
@@ -631,7 +628,10 @@ function calc(raum) {                                           // Über Modul D
    // Auskühlschutz,  hysMinTemp (Variable) Grad hysMinTemp Hysterese. Tiefer darf die Innentemperatur nicht sinken
    var mih = mi + hysMinTemp;      // Temperaturmindestwert hoch (Mindesttemperatur plus Hysterese)
    var mit = mi;                   // Temperaturmindestwert tief
- 
+   var idTemp_min      = pfad + "." + raumPfad + "." + raum + "." + controlPfad + "." + raumDatenpunkte["controlPfad"]["TEMP_Minimum"].DpName;
+    
+   setWerte(idTemp_min, mi)
+
    var idLueften       = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["lüften"].DpName;
    var idLueftenText   = pfad + "." + raumPfad + "." + raum + "." + detailEnginePfad + "." + raumDatenpunkte["detailEnginePfad"]["Beschreibung"].DpName;
    var idLueftenB1     = pfad + "." + raumPfad + "." + raum + "." + detailEnginePfad + "." + raumDatenpunkte["detailEnginePfad"]["b1"].DpName;
@@ -765,51 +765,39 @@ function createJSON() {
     var tempVal = "";
     var strJSONfinal = "[";
     var strJSONtemp = "";
+
  
-    for (var raum in raeume) {
+    for (var raum in Group[pfad][raumPfad]) {
         strJSONtemp = strJSONtemp + "{";
         strJSONtemp = strJSONtemp + "\"Raum\":\"" + raum + "\",";
- 
-        for (var a in raumDatenpunkte) {
-           
-            temppfad = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte[a].DpName
-            if(Group[pfad][raumPfad][raum][raumDatenpunkte[a].DpName]){ ;
-                tempVal = getWerte(temppfad);            // kein Aussensenosr: Lüftungsempfehlung auslesen, Aussensensor: Lüftungsempfehlung freilassen
+        
+        for (var a in Group[pfad][raumPfad][raum]) {
+            if(Group[pfad][raumPfad][raum][a].common){ 
+                temppfad = pfad + "." + raumPfad + "." + raum + "." + a;
+                tempVal = getWerte(temppfad, "val");            // kein Aussensenosr: Lüftungsempfehlung auslesen, Aussensensor: Lüftungsempfehlung freilassen
                 if (tempVal === null) tempVal = "";
-                if(raumDatenpunkte[a].DpName === "Lüftungsempfehlung") {
+                if(a === "Lüftungsempfehlung") {
                     if(tempVal) {
                         anyLueften = true;
                         countLueften = countLueften + 1;
                         raeumeLueftenListe = (raeumeLueftenListe == "")? raeumeLueftenListe + raum : raeumeLueftenListe + ", " + raum ;
                     }
                 }
-                strJSONtemp = strJSONtemp + "\"" + raumDatenpunkte[a].DpName + "\":\"" + tempVal + "\",";
-           }
-           for (var b in raumDatenpunkte[a]) {
-            if(raumDatenpunkte[a][b].DpName != undefined){
-                var name = "";
-                if(a == "controlPfad") continue;
-                switch(a){
-                        case "detailPfad":
-                            name = detailPfad
-                            break;
-                        case "detailEnginePfad":
-                            name = detailEnginePfad;
-                            break;
-                        default:
-                            name = a;
-                    };
-                    temppfad = pfad + "." + raumPfad + "." + raum + "." + name + "." + raumDatenpunkte[a][b].DpName;
-                    if(Group[pfad][raumPfad][raum][name][raumDatenpunkte[a][b].DpName]){
-                        tempVal = getWerte(temppfad); 
-                        strJSONtemp = strJSONtemp + "\"" + raumDatenpunkte[a][b].DpName + "\":\"" + tempVal + "\",";
-                    }
+                strJSONtemp = strJSONtemp + "\"" + a + "\":\"" + tempVal + "\",";
+            }
+            for (var b in Group[pfad][raumPfad][raum][a]) {
+                if(Group[pfad][raumPfad][raum][a][b].common){
+                    if(a === controlPfad) continue;
+                    temppfad = pfad + "." + raumPfad + "." + raum + "." + a + "." + b;
+                    tempVal = getWerte(temppfad,"val"); 
+                    strJSONtemp = strJSONtemp + "\"" + b + "\":\"" + tempVal + "\",";
                 }
             }
         }
+
         strJSONtemp = strJSONtemp.substr(0, strJSONtemp.length - 1);
         strJSONtemp = strJSONtemp + "},";
-   }
+    }
  
    strJSONtemp = strJSONtemp.substr(0, strJSONtemp.length - 1);
    strJSONfinal = strJSONfinal + strJSONtemp + "]";
@@ -827,7 +815,6 @@ function createJSON() {
    if (debug) log("=========================================================");
 }
 // eric2905 Ende ---------------------------------------------------------------
- 
  
  
  
@@ -873,6 +860,54 @@ function valChange(obj) {
    // eric2905 Ende ---------------------------------------------------------------
 }
 
+// Datenpunkte für alle Räume anlegen
+function createOn() {
+   var dpId    = "";
+ 
+   // TODO: Im Modus CONTROL über Objekte: Bei Änderung der OFFSETS, Temperatur_Minimum werden die Änderung erst nach Aktualisierung der Messwerte oder nach Zeit erneuert (auf on() reagieren) 
+   var i =0;
+ 
+   for (var raum in raeume) {
+       
+       if (raeume[raum].Sensor_TEMP) {
+           dpId = raeume[raum].Sensor_TEMP;
+           i++;
+           on({id: dpId ,change:'ne'}, function (obj) {
+               valChange(obj);
+           });
+           if (debug) log("on: " + dpId + " angelegt.");
+       }
+ 
+       if (raeume[raum].Sensor_HUM) {
+           dpId = raeume[raum].Sensor_HUM;
+           i++;
+           on({id: dpId ,change:'ne'}, function (obj) {
+               valChange(obj)
+           });
+           if (debug) log("on: " + dpId + " angelegt.");
+       }
+
+       if (raeume[raum].TEMP_Minimum) {
+           dpId = raeume[raum].TEMP_Minimum;
+           i++;
+           if(typeof dpId !== "number"){
+                on({id: dpId ,change:'ne'}, function (obj) {
+                    valChange(obj)
+                });
+                if (debug) log("on: " + dpId + " angelegt.");
+           }
+       }
+   }
+   i++
+   on({id: pressure_Sensor ,change:'ne'}, function (obj) {
+        setWerte(pfad + "." + raumPfad + "." + infoPfad + ".Luftdruck", obj.state.val) ;
+                });
+        if (debug) log("on: " + dpId + " angelegt.");
+        
+   log("Subscriptions angelegt: " + i);
+}
+ 
+
  
 // Schedule
 // =============================================================================
@@ -901,5 +936,6 @@ function main() {
 // Skriptstart
 // =============================================================================
 init();
+setTimeout(createOn,2000);  // Subscriptions anlegen
 setTimeout(main,    4000);  // Zum Skriptstart ausführen
  
