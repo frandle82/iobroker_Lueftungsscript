@@ -111,7 +111,7 @@ var pressure_Sensor = "zigbee.0.00158d0005446ec5.pressure";        // Globaler D
 
 var openwindowtemp  = 12; 
 var hunn            = 15;           // eigene Höhe über nn (normalnull), z.B. über http://de.mygeoposition.com zu ermitteln
-var defaultTemp     = 18.00;     // Default TEMP_Minimum, wenn im Raum nicht angegeben (Auskühlschutz, tiefer soll eine Raumtemperatur durchs lüften nicht sinken)
+var defaultTemp     = 19.00;     // Default TEMP_Minimum, wenn im Raum nicht angegeben (Auskühlschutz, tiefer soll eine Raumtemperatur durchs lüften nicht sinken)
 var defaultMinFeu   = 40.00;     // Default Mindest Feuchte wenn nicht angegeben.
 var defaultMaxFeu   = 60.00;     // Default Maximal Feuchte wenn nicht angegeben.
  
@@ -231,7 +231,7 @@ var Group = {};             // Group-Objekt bekommt alle Werte und Informationen
 var dewpoint = function(h) {
         var z = 1.0 - (0.0065 / 288.15) * h;
         // air pressure in hPa
-        this.p = 1013.25 * Math.pow(z, 5.255);
+        this.p = ((pressure_Sensor == "") ? 1013.25 : getState(pressure_Sensor).val) * Math.pow(z, 5.255);
         this.A = 6.112;
         }
 dewpoint.prototype.Calc = function(t, rh) {
@@ -333,15 +333,7 @@ function init() {
         Group[pfad][id].common = common;
         Group[pfad][id].val = common.def
     }                                                
-    Group[pfad][raumPfad] = {};                                // Anlegen Ebene Raumpfad
-    Group[pfad][infoPfad] = {};
-    for (var prop1 in Skriptinfo["infoPfad"]){
-
-        common = Skriptinfo["infoPfad"][Skriptinfo["infoPfad"][prop1].DpName].common;
-        Group[pfad][infoPfad][prop1] = {}
-        Group[pfad][infoPfad][prop1].common = common;
-        Group[pfad][infoPfad][prop1].val = common.def
-    }   
+    Group[pfad][raumPfad] = {};                                // Anlegen Ebene Raumpfad  
     for (var raum in raeume) {
         Group[pfad][raumPfad][raum] = {};                       // Anlegen Ebene DP Raum                                
         for (var datenpunktID in raumDatenpunkte) {
@@ -383,13 +375,21 @@ function init() {
             }
         }
     }
+    Group[pfad][infoPfad] = {};
+    for (var prop1 in Skriptinfo["infoPfad"]){
+
+        common = Skriptinfo["infoPfad"][Skriptinfo["infoPfad"][prop1].DpName].common;
+        Group[pfad][infoPfad][prop1] = {}
+        Group[pfad][infoPfad][prop1].common = common;
+        Group[pfad][infoPfad][prop1].val = common.def
+    } 
     createDp(Group);
     calcAll();
     setGloblvar()
 };
 
 
-function createDp(obj, propStr = '') {
+async function createDp(obj, propStr = '') {
     var control_path = (!Control)? controlPfad: "/";
     var detail_path = (!Details_DP)? detailPfad: "/";
     var detailE_path = (!DetailsLuft_DP)? detailEnginePfad: "/";
@@ -403,7 +403,7 @@ function createDp(obj, propStr = '') {
             if(!propStr.includes(control_path) && !propStr.includes(detail_path) && !propStr.includes(detailE_path) && !propStr.includes(raum_path)){
                 var common = getWerte(propStr,"common");
                 var val = getWerte(propStr,"val")
-                if(!existsState(propStr)) createState(propStr,common);
+                createStateAsync(propStr,common);
             } 
         }
     });
@@ -539,12 +539,12 @@ function calc(raum) {                                           // Über Modul D
    if(typeof raeume[raum].Sensor_TEMP_OFFSET !=="undefined") {
        // Temperatur, wenn ein Offset vorhanden ist, diesen auslesen und Default überschreiben
        var idtoffset = pfad + "." +  raumPfad + "." + raum + ".CONTROL.Sensor_TEMP_OFFSET";
-       toffset = getState(idtoffset).val;  // Offset aus den Objekten/Datenpunkt auslesen
+       if(existsState(idtoffset)) toffset = getState(idtoffset).val;  // Offset aus den Objekten/Datenpunkt auslesen
    }
    if(typeof raeume[raum].Sensor_HUM_OFFSET !=="undefined") {
        // Luftfeuchtigkeit, wenn ein Offset vorhanden ist, diesen auslesen und Default überschreiben
        var idrhoffset = pfad + "." + raumPfad + "." + raum + ".CONTROL.Sensor_HUM_OFFSET";
-       rhoffset = getState(idrhoffset).val;  // Offset aus den Objekten/Datenpunkt auslesen
+       if(existsState(idrhoffset)) rhoffset = getState(idrhoffset).val;  // Offset aus den Objekten/Datenpunkt auslesen
    }
  
    t       = t     + toffset;      // Messwertanpassung: gemessene Temperatur um den Offset ergänzen
@@ -565,7 +565,7 @@ function calc(raum) {                                           // Über Modul D
    var iddp    = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["dp"].DpName;  // DP-ID Taupunkt in °C
    var idt     = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["t"].DpName;   // DP-ID Temperatur inkl. Offset
    var idrh    = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["rh"].DpName;  // DP-ID relative Luftfeuhtigkeit inkl. Offset
-   var ih      = pfad + "." + raumPfad + "." + raum + "." +  detailPfad + "." + raumDatenpunkte["detailPfad"]["h"].DpName;   // DP-ID Enthalpie in kJ/kg
+   var ih      = pfad + "." + raumPfad + "." + raum + "." + detailPfad + "." + raumDatenpunkte["detailPfad"]["h"].DpName;   // DP-ID Enthalpie in kJ/kg
    var isdd    = pfad + "." + raumPfad + "." + raum + "."+  detailPfad + "." + raumDatenpunkte["detailPfad"]["sdd"].DpName;
    var idd     = pfad + "." + raumPfad + "." + raum + "."+  detailPfad + "." + raumDatenpunkte["detailPfad"]["dd"].DpName;
    var ird     = pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["rd"].DpName;
@@ -594,11 +594,12 @@ function calc(raum) {                                           // Über Modul D
    var idta, idxa;
    if(typeof raeume[raum].Aussensensor !=="undefined") {
        aussen = raeume[raum].Aussensensor; // aussen = "Raumname" des zugehörigen Aussensensors
-       idta = pfad + "." + raumPfad + "." + aussen + "." + raumDatenpunkte["t"].DpName;    // DP-ID zugehöriger Aussensensor, Temperatur aussen
-       idxa = pfad + "." + raumPfad + "." + aussen + "." + raumDatenpunkte["x"].DpName;    // DP-ID zugehöriger Aussensensor, Luftfeuchtigkeit aussen
+       idta = raeume[aussen].Sensor_TEMP;    // DP-ID zugehöriger Aussensensor, Temperatur aussen
+       idxa = raeume[aussen].Sensor_HUM;    // DP-ID zugehöriger Aussensensor, Luftfeuchtigkeit aussen
    } else {
        return; // wenn es keinen zugehörigen Aussensensor gibt, Funktion beenden (dann muss kein Vergleich berechnet werden)
    }
+
  
    var ti = t;                     // Raumtemperatur in °C
    var xi = runden(x,2);           // Raumfeuchtegehalt in g/kg
@@ -700,7 +701,7 @@ function calc(raum) {                                           // Über Modul D
    } else {
        // Hysterese. Keine Änderung der bisherigen Empfehlung.
        if (debug) log(raum + ': <span style="color:orange;"><b>im Bereich der Hysterese</b></span> (keine Änderung der Lüftungsempfehlung');
-       if (getState(idLueften).val === null) setState(idLueften,false,true); // noch keine Empfehlung vorhanden, "Fenster zu" empfehlen
+       if (getWerte(idLueften,"val") === null) setWerte(idLueften,false); // noch keine Empfehlung vorhanden, "Fenster zu" empfehlen
        lueftenText = "Hysterese, keine Änderung der Lüftungsempfehlung:";
        setWerte(idLueftenHys,true);
    }
@@ -752,6 +753,7 @@ function calc(raum) {                                           // Über Modul D
 //eric2905 Erzeuge JSON und setzen Variablen "anyLueften" und "countLueften"
 // -----------------------------------------------------------------------------
 function createJSON() {
+
    // alle Daten im JSON werden als String abgelegt
    if (debug) log("=========================================================");
    if (debug) log("Erzeugung JSON Start");
@@ -774,14 +776,11 @@ function createJSON() {
         for (var a in Group[pfad][raumPfad][raum]) {
             if(Group[pfad][raumPfad][raum][a].common){ 
                 temppfad = pfad + "." + raumPfad + "." + raum + "." + a;
-                tempVal = getWerte(temppfad, "val");            // kein Aussensenosr: Lüftungsempfehlung auslesen, Aussensensor: Lüftungsempfehlung freilassen
-                if (tempVal === null) tempVal = "";
-                if(a === "Lüftungsempfehlung") {
-                    if(tempVal) {
+                tempVal = getWerte(temppfad, "val");        
+                if(a === "Lüftungsempfehlung" && tempVal) {
                         anyLueften = true;
-                        countLueften = countLueften + 1;
-                        raeumeLueftenListe = (raeumeLueftenListe == "")? raeumeLueftenListe + raum : raeumeLueftenListe + ", " + raum ;
-                    }
+                        countLueften++;
+                        raeumeLueftenListe += (raeumeLueftenListe == "")? raum : ", " + raum ;
                 }
                 strJSONtemp = strJSONtemp + "\"" + a + "\":\"" + tempVal + "\",";
             }
