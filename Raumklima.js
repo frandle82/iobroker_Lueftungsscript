@@ -222,8 +222,7 @@ var trendZeit   = 30                    // Zeit nach dem ein Luftfeuchtetrend er
          "Aussensensor"          :   "Aussen"
      },
  };
-    
- // =============================================================================
+     // =============================================================================
   
  // =============================================================================
  // Skriptbereich. Ab hier muss nichts mehr eingestellt / verändert werden.
@@ -302,7 +301,6 @@ var Skriptinfo = {
 "infoPfad" : {
 "Luftdruck" : {DpName : "Luftdruck",common: { read: true, write : true, name: "mittlerer Luftdruck in bar", desc: "mittlerer Luftdruck in bar, errechnet anhand der eigenen Höhe über NN",type: 'number', unit : 'bar', role: 'info', def: 0}},
 "Höhe_über_NN" : {DpName : "Höhe_über_NN",common: { read: true, write : true, name: 'Eigene Höhe über NN',desc: 'Eigene Höhe über NN (Normal Null), als Basis für den mittleren Luftdruck',type: 'number', unit : 'm', role: 'info', def: 0}},
-"Feuchtetrend" : {DpName : "Feuchtetrend",common: { read: true, write : true, name: 'Trend abs. Feuchte aussen',desc: 'Trend der absolute Feuchte im Aussenbereich',type: 'string', unit : '', role: 'info', def: ""}},
 },
 };
 var infoTrend = {
@@ -711,7 +709,7 @@ function calc(raum) {                                           // Über Modul D
    //--------------------------------------------------------------------------
    if (b1lp && b2lp && b3lp && b4lp) {
        // Lüftungsempfehlung, alle Bedingungenen erfüllt
-       lueftenText = "Bei Austausch der halben Raumluft beträgt die relative Feuchte " + rhluft + ".";
+       lueftenText = "Bei Austausch der halben Raumluft beträgt die relative Feuchte " + rhluft + "%.";
        setWerte(idLueften, true);
        setWerte(idLueftenHys,false);
  
@@ -1013,7 +1011,7 @@ function createOn() {
         
    log("Subscriptions angelegt: " + i);
 
-   on({id: pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["rd"].DpName ,change:'ne'}, function () {
+   on({id: pfad + "." + raumPfad + "." + raum + "." + raumDatenpunkte["x"].DpName ,change:'ne'}, function () {
         trendWertSpeicherung("Aussen")
                 });
         if (debug) log("on: " + dpId + " angelegt.");
